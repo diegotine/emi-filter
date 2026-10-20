@@ -1,0 +1,25 @@
+Fontes incorporadas por epaint_default_fonts 0.31.1
+
+Ubuntu Light
+Copyright 2011 Canonical Ltd.  Licensed under the Ubuntu Font Licence 1.0
+Aviso transcrito do registro nameID=0 do arquivo Ubuntu-Light.ttf original.
+Texto da licença: UFL.txt.
+
+Noto Emoji
+Copyright 2013 Google Inc. All Rights Reserved.
+Aviso transcrito do registro nameID=0 do arquivo NotoEmoji-Regular.ttf original.
+Texto da licença: OFL.txt (SIL Open Font License 1.1).
+
+Hack Regular
+Copyright 2018 Source Foundry Authors; componentes DejaVu/Bitstream Vera.
+Avisos e textos originais completos: Hack-Regular.txt.
+
+Emoji icon font
+Copyright (c) 2014 John Slegers.
+Texto e aviso originais: emoji-icon-font-mit-license.txt.
+
+Proveniência: pacote epaint_default_fonts 0.31.1 distribuído no crates.io.
+https://crates.io/crates/epaint_default_fonts/0.31.1
+https://github.com/emilk/egui/tree/0.31.1/crates/epaint_default_fonts
+Os arquivos de licença que acompanham esta nota foram copiados sem alteração.
+Nenhum binário de fonte adicional foi copiado para licenses/.

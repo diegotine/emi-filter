@@ -1,0 +1,7 @@
+/target/
+/dist/
+/modelo_usuario.json
+/atenuacao.csv
+/emi-filter-config.json
+/emi-filter-atenuacao.csv
+/atenuacao-10khz.csv
