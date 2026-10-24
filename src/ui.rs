@@ -1738,7 +1738,8 @@ impl eframe::App for EmiApp {
                     self.comparison_plot(ui);
                 } else if self.plot_tab==0 {self.plot(ui);} else {self.additional_plot(ui);}
                 self.harmonic_table(ui);
-                ui.label(RichText::new(format!("Hipóteses: rede indutiva normalizada a {} Hz; perdas constantes; série truncada. Valores editáveis não são validação elétrica dos componentes.",compact(self.parameters.grid_z_ref_hz))).small().color(MUTED));
+                ui.label(RichText::new(format!("Rede: Z(f) = R + j2πfL, referência em {} Hz. Rs/ESR constantes sem tabela Z(f). Harmônicas até {} Hz.",compact(self.parameters.grid_z_ref_hz),compact(self.parameters.noise_max_hz))).small().color(MUTED))
+                    .on_hover_text(format!("A reatância da rede cresce linearmente com a frequência.\n|Z| por fase: {:.3} Ω em {:.0} Hz; {:.3} Ω em 10 kHz; {:.3} Ω em 1 MHz.\nAs portas DM e CM são calculadas separadamente. As resistências equivalentes de perdas dos componentes são aproximações constantes, salvo tabela Z(f) ativa. Valores editáveis não validam eletricamente os componentes.",self.parameters.grid_phase_impedance(self.parameters.grid_z_ref_hz).norm(),self.parameters.grid_z_ref_hz,self.parameters.grid_phase_impedance(10000.0).norm(),self.parameters.grid_phase_impedance(1000000.0).norm()));
             });
         });
         if let Ok(path) = std::env::var("EMI_SCREENSHOT") {

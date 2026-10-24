@@ -74,3 +74,7 @@
   `EMI_DEFAULTS_PATH` é útil para testes isolados. Não sobrescrever dados do usuário.
 - 19 testes; a validação e a regressão independente precisam continuar passando.
 - Entrega local ativa: `EMI-Filter-entrega-v1.2.0` na pasta do projeto original.
+
+- Correção do rodapé da v1.3.0 recompilada para os dois sistemas e substituída
+  na mesma release a pedido do usuário. A equação da rede já estava correta;
+  resultados numéricos preservados. Teste de impedância cobre 60 Hz a 1 MHz.

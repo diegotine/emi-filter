@@ -1213,6 +1213,17 @@ mod tests {
     #[test]
     fn grid_is_inductive_and_calibrated_per_phase() {
         let p = Parameters::default();
+        // The distribution-network reference is per phase at 60 Hz, not
+        // a frequency-independent termination. Check the complete sweep range.
+        for f in [60.0, 1000.0, 10000.0, 100000.0, 1000000.0] {
+            let phase = p.grid_phase_impedance(f);
+            let dm = p.grid_dm_impedance(f);
+            let cm = p.grid_cm_impedance(f);
+            close(phase.re, 0.0, 1e-14);
+            close(phase.im, 0.5 * f / 60.0, 1e-10);
+            close(dm.im, f / 60.0, 1e-10);
+            close(cm.im, 0.5 * f / 60.0, 1e-10);
+        }
         close(p.grid_phase_impedance(60.0).norm(), 0.5, 1e-14);
         close(p.grid_dm_impedance(60.0).norm(), 1.0, 1e-14);
         close(p.grid_dm_impedance(10000.0).im, 10000.0 / 60.0, 1e-10);

@@ -1,5 +1,16 @@
 # Validação da entrega
 
+## Esclarecimento do rodapé após a publicação
+
+A equação da rede já segue R+j2πfL com 0,5 Ω por fase a 60 Hz.
+Rodapé alterado para distinguir a reatância variável da rede das resistências
+Rs/ESR constantes dos componentes sem tabela Z(f). Tooltip apresenta exemplos
+calculados. Teste ampliado de 60 Hz até 1 MHz. Equações e resultados preservados.
+Executáveis Linux e Windows, pacotes, capturas e hashes da v1.3.0
+recompilados e substituídos para incluir esta correção de texto.
+O cálculo e o CSV permanecem idênticos aos da publicação inicial.
+
+
 ## Publicação v1.3.0 — 23/10/2026
 
 - 19 testes passaram com `cargo test --locked --offline`.

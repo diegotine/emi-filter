@@ -29,6 +29,9 @@ parâmetros atuais estão descritos no [manual de referência](docs/MANUAL.md).
   O modelo continua linear; coeficientes não lineares ativos bloqueiam o cálculo.
 - Título da janela: **EMI Filter v1.3.0 -- Made with Codex**.
 - Executáveis atualizados para **Linux x86_64** e **Windows 10/11 x86_64**.
+- Rodapé esclarece que a impedância da rede varia conforme `Z(f)=R+j2πfL`;
+  Rs/ESR dos componentes são constantes sem tabela Z(f). Tooltip mostra valores
+  da rede em frequências diferentes. Arquivos v1.3.0 substituídos com essa correção.
 
 As funções incorporadas nas entregas locais 1.1/1.2 estão incluídas nesta
 publicação; o histórico público anterior é a v1.0.0. As equações do circuito
