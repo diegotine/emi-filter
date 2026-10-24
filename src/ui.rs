@@ -1,6 +1,8 @@
 use crate::engine::{self, Parameters, Simulation};
+use crate::history::{GraphRecord, History, Snapshot};
+use crate::{parameter_editor, storage};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, RichText, Sense, Stroke, Vec2};
-use std::f64::consts::PI;
+use std::sync::Arc;
 
 const BLUE: Color32 = Color32::from_rgb(42, 120, 186);
 const CYAN: Color32 = Color32::from_rgb(222, 238, 249);
@@ -10,14 +12,235 @@ const INK: Color32 = Color32::from_rgb(32, 57, 75);
 const MUTED: Color32 = Color32::from_rgb(90, 115, 130);
 const BORDER: Color32 = Color32::from_rgb(198, 215, 226);
 
+type PlotSeries<'a> = (&'a str, Color32, Vec<[f64; 2]>);
+
+/// Título e legenda sobre a grade, sem reservar altura fora das curvas.
+fn plot_header(
+    painter: &egui::Painter,
+    rect: Rect,
+    title: &str,
+    timestamp: Option<&str>,
+    legend: &[(&str, Color32, bool)],
+) {
+    let title_rect = painter.text(
+        rect.min + Vec2::new(12.0, 15.0),
+        Align2::LEFT_CENTER,
+        title,
+        FontId::proportional(17.0),
+        INK,
+    );
+    if let Some(timestamp) = timestamp {
+        painter.text(
+            Pos2::new(title_rect.right() + 12.0, title_rect.center().y),
+            Align2::LEFT_CENTER,
+            timestamp,
+            FontId::proportional(11.0),
+            MUTED,
+        );
+    }
+    let left = rect.left() + 12.0;
+    let mut x = left;
+    let mut y = rect.top() + 39.0;
+    for &(label, color, dashed) in legend {
+        let text = painter.layout_no_wrap(label.into(), FontId::proportional(12.0), color);
+        let width = 28.0 + text.size().x + 18.0;
+        if x > left && x + width > rect.right() - 12.0 {
+            x = left;
+            y += 19.0;
+        }
+        if label.contains("harmônicas") {
+            painter.circle_filled(Pos2::new(x + 9.0, y), 3.5, color);
+        } else if dashed {
+            for start in [0.0, 8.0, 16.0] {
+                painter.line_segment(
+                    [Pos2::new(x + start, y), Pos2::new(x + start + 4.0, y)],
+                    Stroke::new(1.8_f32, color),
+                );
+            }
+        } else {
+            painter.line_segment(
+                [Pos2::new(x, y), Pos2::new(x + 20.0, y)],
+                Stroke::new(1.8_f32, color),
+            );
+        }
+        let text_height = text.size().y;
+        painter.galley(Pos2::new(x + 28.0, y - text_height / 2.0), text, color);
+        x += width;
+    }
+}
+
+/// Escalas comuns às séries; x' é log10(x) somente para curvas espectrais.
+fn scientific_plot(
+    ui: &mut egui::Ui,
+    heading: (&str, Option<&str>),
+    xunit: &str,
+    yunit: &str,
+    series: &[PlotSeries<'_>],
+    log_x: bool,
+    y_bounds: Option<[f64; 2]>,
+) {
+    let (title, timestamp) = heading;
+    let height = (ui.ctx().screen_rect().bottom() - ui.cursor().top() - 55.0).max(180.0);
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 0.0, Color32::WHITE);
+    let legend = series
+        .iter()
+        .map(|(label, color, _)| (*label, *color, label.contains("CM")))
+        .collect::<Vec<_>>();
+    let chart = Rect::from_min_max(
+        rect.min + Vec2::new(85.0, 20.0),
+        rect.max - Vec2::new(25.0, 38.0),
+    );
+    let transform = |x: f64| if log_x { x.log10() } else { x };
+    let mut xmin = f64::INFINITY;
+    let mut xmax = f64::NEG_INFINITY;
+    let mut ymin = f64::INFINITY;
+    let mut ymax = f64::NEG_INFINITY;
+    for (_, _, points) in series {
+        for &[x, y] in points {
+            let x = transform(x);
+            if x.is_finite() && y.is_finite() {
+                xmin = xmin.min(x);
+                xmax = xmax.max(x);
+                ymin = ymin.min(y);
+                ymax = ymax.max(y);
+            }
+        }
+    }
+    if !xmin.is_finite() {
+        plot_header(
+            &painter.with_clip_rect(chart),
+            chart,
+            title,
+            timestamp,
+            &legend,
+        );
+        return;
+    }
+    let dy = (ymax - ymin).max(1e-12) * 0.08;
+    ymin -= dy;
+    ymax += dy;
+    if let Some([lo, hi]) = y_bounds {
+        ymin = lo;
+        ymax = hi.max(lo + 1.0);
+    }
+    let dx = (xmax - xmin).max(1e-12);
+    let pos = |x: f64, y: f64| {
+        Pos2::new(
+            chart.left() + ((transform(x) - xmin) / dx) as f32 * chart.width(),
+            chart.bottom() - ((y - ymin) / (ymax - ymin)) as f32 * chart.height(),
+        )
+    };
+    for i in 0..=5 {
+        let ratio = i as f64 / 5.0;
+        let x = xmin + ratio * dx;
+        let px = chart.left() + ratio as f32 * chart.width();
+        painter.line_segment(
+            [Pos2::new(px, chart.top()), Pos2::new(px, chart.bottom())],
+            Stroke::new(0.5f32, BORDER),
+        );
+        painter.text(
+            Pos2::new(px, chart.bottom() + 14.0),
+            Align2::CENTER_CENTER,
+            if log_x {
+                frequency_label(10f64.powf(x))
+            } else {
+                format!("{x:.2}")
+            },
+            FontId::monospace(10.0),
+            MUTED,
+        );
+    }
+    for i in 0..=5 {
+        let ratio = i as f64 / 5.0;
+        let y = ymin + ratio * (ymax - ymin);
+        let py = chart.bottom() - ratio as f32 * chart.height();
+        painter.line_segment(
+            [Pos2::new(chart.left(), py), Pos2::new(chart.right(), py)],
+            Stroke::new(if y == 0.0 { 0.8_f32 } else { 0.5_f32 }, BORDER),
+        );
+        painter.text(
+            Pos2::new(chart.left() - 6.0, py),
+            Align2::RIGHT_CENTER,
+            if y.abs() >= 10000.0 || (y != 0.0 && y.abs() < 0.001) {
+                format!("{y:.2e}")
+            } else {
+                format!("{y:.3}")
+            },
+            FontId::monospace(10.0),
+            MUTED,
+        );
+    }
+    painter.text(
+        Pos2::new(rect.left() + 8.0, chart.top()),
+        Align2::LEFT_TOP,
+        yunit,
+        FontId::monospace(11.0),
+        MUTED,
+    );
+    painter.text(
+        rect.right_bottom(),
+        Align2::RIGHT_BOTTOM,
+        xunit,
+        FontId::monospace(11.0),
+        MUTED,
+    );
+    let clip = painter.with_clip_rect(chart);
+    for (label, color, points) in series {
+        let points = points
+            .iter()
+            .filter(|p| transform(p[0]).is_finite() && p[1].is_finite())
+            .map(|p| pos(p[0], p[1]))
+            .collect::<Vec<_>>();
+        if label.contains("CM") {
+            for segment in points.windows(2) {
+                if ((segment[0].x - chart.left()) / 6.0) as i32 % 2 == 0 {
+                    clip.line_segment([segment[0], segment[1]], Stroke::new(1.5f32, *color));
+                }
+            }
+        } else {
+            clip.add(egui::Shape::line(points, Stroke::new(1.5f32, *color)));
+        }
+    }
+    if let Some(pointer) = response.hover_pos().filter(|p| chart.contains(*p)) {
+        let x = xmin + ((pointer.x - chart.left()) / chart.width()) as f64 * dx;
+        let x = if log_x { 10f64.powf(x) } else { x };
+        response.on_hover_ui_at_pointer(|ui| {
+            ui.monospace(format!("{x:.5} {xunit}"));
+            for (label, color, points) in series {
+                if let Some(p) = points
+                    .iter()
+                    .min_by(|a, b| (a[0] - x).abs().total_cmp(&(b[0] - x).abs()))
+                {
+                    ui.colored_label(*color, format!("{label}: {:.6e} {yunit}", p[1]));
+                }
+            }
+        });
+    }
+    plot_header(
+        &painter.with_clip_rect(chart),
+        chart,
+        title,
+        timestamp,
+        &legend,
+    );
+}
+
 pub struct EmiApp {
     parameters: Parameters,
     calculated: Parameters,
-    simulation: Option<Simulation>,
+    simulation: Option<Arc<Simulation>>,
+    history: History,
+    editor: parameter_editor::Editor,
     error: Option<String>,
     status: String,
     duration_ms: f64,
-    model_tab: usize,
+    plot_tab: usize,
+    modal_total: bool,
+    wave_mode: usize,
+    derivative_order: usize,
     show_dm: bool,
     show_cm: bool,
     show_harmonics: bool,
@@ -61,21 +284,78 @@ impl EmiApp {
             .insert(egui::TextStyle::Small, FontId::proportional(11.0));
         cc.egui_ctx.set_style(style);
 
-        let parameters = Parameters::default();
+        let defaults_path = storage::defaults_path();
+        let (parameters, startup) = if defaults_path.exists() {
+            match std::fs::read_to_string(&defaults_path)
+                .map_err(|e| e.to_string())
+                .and_then(|s| storage::read_document(&s))
+                .and_then(|d| {
+                    d.parameters.validate()?;
+                    Ok(d.parameters)
+                }) {
+                Ok(p) => (p, format!("Padrões pessoais: {}", defaults_path.display())),
+                Err(e) => (
+                    Parameters::default(),
+                    format!("Padrões pessoais não carregados: {e}"),
+                ),
+            }
+        } else {
+            (Parameters::default(), "Modelo original carregado".into())
+        };
         let started = std::time::Instant::now();
         let result = engine::calculate(&parameters);
         let (simulation, error) = match result {
-            Ok(result) => (Some(result), None),
+            Ok(result) => (Some(Arc::new(result)), None),
             Err(error) => (None, Some(error)),
         };
+        let mut history = History::default();
+        if let Some(s) = &simulation {
+            history.record(Snapshot {
+                record: GraphRecord {
+                    parameters: parameters.clone(),
+                    timestamp: storage::timestamp(),
+                },
+                simulation: s.clone(),
+            });
+        }
+        let mut editor = parameter_editor::Editor::new();
+        if let Ok(group) = std::env::var("EMI_SCREENSHOT_COMPONENT") {
+            editor.select(&group);
+        }
+        if std::env::var_os("EMI_SCREENSHOT_COMPARE").is_some() {
+            for factor in [1.4, 2.0] {
+                let mut p = parameters.clone();
+                p.cx2_uf *= factor;
+                if let Ok(s) = engine::calculate(&p) {
+                    history.record(Snapshot {
+                        record: GraphRecord {
+                            parameters: p,
+                            timestamp: storage::timestamp(),
+                        },
+                        simulation: Arc::new(s),
+                    });
+                }
+            }
+            history.overlay = true;
+            history.selected = 0;
+        }
         Self {
+            history,
+            editor,
             calculated: parameters.clone(),
             parameters,
             simulation,
             error,
-            status: "Modelo original carregado".into(),
+            status: startup,
             duration_ms: started.elapsed().as_secs_f64() * 1000.0,
-            model_tab: 0,
+            plot_tab: std::env::var("EMI_SCREENSHOT_TAB")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|v| *v < 3)
+                .unwrap_or(0),
+            modal_total: true,
+            wave_mode: 0,
+            derivative_order: 0,
             show_dm: true,
             show_cm: true,
             show_harmonics: true,
@@ -94,11 +374,25 @@ impl EmiApp {
         let started = std::time::Instant::now();
         match engine::calculate(&self.parameters) {
             Ok(simulation) => {
+                let simulation = Arc::new(simulation);
+                self.history.record(Snapshot {
+                    record: GraphRecord {
+                        parameters: self.parameters.clone(),
+                        timestamp: storage::timestamp(),
+                    },
+                    simulation: simulation.clone(),
+                });
                 self.simulation = Some(simulation);
+                self.history.edit_target = (self.history.selected + 1 < self.history.graphs.len())
+                    .then_some(self.history.selected);
                 self.calculated = self.parameters.clone();
                 self.error = None;
                 self.duration_ms = started.elapsed().as_secs_f64() * 1000.0;
-                self.status = format!("Gráfico atualizado · {:.1} ms", self.duration_ms);
+                self.status = format!(
+                    "Gráfico {} atualizado · {:.1} ms",
+                    self.history.selected + 1,
+                    self.duration_ms
+                );
             }
             Err(error) => {
                 self.error = Some(error);
@@ -112,7 +406,11 @@ impl EmiApp {
             ui.add_space(4.0);
             ui.vertical(|ui| {
                 ui.label(RichText::new("EMI FILTER").size(22.0).strong().color(BLUE));
-                ui.label(RichText::new("Bancada de simulação").small().color(MUTED));
+                ui.label(
+                    RichText::new(format!("v{} -- Made with Codex", env!("CARGO_PKG_VERSION")))
+                        .small()
+                        .color(MUTED),
+                );
             });
             ui.add_space(20.0);
             toolbar_measure(
@@ -138,10 +436,19 @@ impl EmiApp {
             toolbar_measure(
                 ui,
                 "Excitação",
-                "2 × quadrada",
+                if self.parameters.extra.ringing_enabled {
+                    "2 × ringing"
+                } else {
+                    "2 × quadrada"
+                },
                 &format!(
                     "{} kHz · {}°",
-                    compact(self.parameters.noise_frequency_hz / 1000.0),
+                    compact(
+                        self.parameters
+                            .extra
+                            .fundamental(self.parameters.noise_frequency_hz)
+                            / 1000.0
+                    ),
                     compact(self.parameters.noise_delay_deg)
                 ),
             );
@@ -160,9 +467,44 @@ impl EmiApp {
                 {
                     self.calculate();
                 }
-                if ui.button("Restaurar valores").clicked() {
-                    self.parameters = Parameters::default();
-                    self.calculate();
+                if ui.button("Carregar padrões").clicked() {
+                    let path = storage::defaults_path();
+                    if path.exists() {
+                        match std::fs::read_to_string(path)
+                            .map_err(|e| e.to_string())
+                            .and_then(|s| storage::read_document(&s))
+                        {
+                            Ok(doc) => {
+                                self.parameters = doc.parameters;
+                                self.status =
+                                    "Padrões pessoais carregados; calcule para comparar".into();
+                                self.error = None;
+                            }
+                            Err(e) => self.error = Some(e),
+                        }
+                    } else {
+                        self.parameters = Parameters::default();
+                        self.status = "Padrões originais carregados; calcule para comparar".into();
+                    }
+                }
+                if ui
+                    .button("Salvar padrões")
+                    .on_hover_text(storage::defaults_path().display().to_string())
+                    .clicked()
+                {
+                    match self.parameters.validate().and_then(|()| {
+                        storage::save(
+                            &storage::defaults_path(),
+                            &storage::Document::new(self.parameters.clone()),
+                        )
+                    }) {
+                        Ok(()) => {
+                            self.status =
+                                format!("Padrões salvos: {}", storage::defaults_path().display());
+                            self.error = None;
+                        }
+                        Err(e) => self.error = Some(e),
+                    }
                 }
             });
         });
@@ -191,11 +533,23 @@ impl EmiApp {
             &mut self.show_harmonics,
             GREEN,
             "H",
-            "Duas quadradas",
+            if self.parameters.extra.ringing_enabled {
+                "Pacotes de ringing"
+            } else {
+                "Duas quadradas"
+            },
             "Harmônicas presentes",
         );
         ui.add_space(6.0);
         ui.checkbox(&mut self.automatic_db, "Escala dB automática");
+        ui.checkbox(&mut self.modal_total, "Incluir conversão DM↔CM");
+        ui.label(
+            RichText::new(
+                "Com conversão: mede a norma das duas fases para cada excitação modal pura.",
+            )
+            .small()
+            .color(MUTED),
+        );
         if !self.automatic_db {
             numeric_row(ui, "Mínimo", &mut self.plot_min_db, "dB", 0.5);
             numeric_row(ui, "Máximo", &mut self.plot_max_db, "dB", 0.5);
@@ -260,10 +614,11 @@ impl EmiApp {
         ui.add(egui::TextEdit::singleline(&mut self.json_path).desired_width(f32::INFINITY));
         ui.horizontal(|ui| {
             if ui.button("Salvar").clicked() {
-                match serde_json::to_string_pretty(&self.parameters)
-                    .map_err(|e| e.to_string())
-                    .and_then(|s| std::fs::write(&self.json_path, s).map_err(|e| e.to_string()))
-                {
+                let mut document = storage::Document::new(self.parameters.clone());
+                document.graphs = self.history.records();
+                document.selected_graph = self.history.selected;
+                document.overlay = self.history.overlay;
+                match storage::save(std::path::Path::new(&self.json_path), &document) {
                     Ok(()) => {
                         self.status = format!("Salvo: {}", self.json_path);
                         self.error = None;
@@ -274,16 +629,44 @@ impl EmiApp {
             if ui.button("Abrir").clicked() {
                 match std::fs::read_to_string(&self.json_path)
                     .map_err(|e| e.to_string())
-                    .and_then(|s| serde_json::from_str::<Parameters>(&s).map_err(|e| e.to_string()))
+                    .and_then(|s| storage::read_document(&s))
                 {
-                    Ok(parameters) => {
-                        self.parameters = parameters;
-                        self.calculate();
+                    Ok(doc) => {
+                        let restored = (|| -> Result<History, String> {
+                            let mut h = History::default();
+                            for record in doc.graphs {
+                                let simulation = Arc::new(engine::calculate(&record.parameters)?);
+                                h.record(Snapshot { record, simulation });
+                            }
+                            h.selected = doc.selected_graph;
+                            h.overlay = doc.overlay;
+                            Ok(h)
+                        })();
+                        match restored {
+                            Ok(history) => {
+                                self.history = history;
+                                self.parameters = doc.parameters;
+                                if let Some(snapshot) = self.history.select(self.history.selected) {
+                                    self.simulation = Some(snapshot.simulation);
+                                    self.calculated = snapshot.record.parameters;
+                                } else {
+                                    self.calculate();
+                                }
+                                self.error = None;
+                                self.status = "Sessão carregada com parâmetros e histórico".into();
+                            }
+                            Err(e) => self.error = Some(format!("Histórico incompatível: {e}")),
+                        }
                     }
                     Err(error) => self.error = Some(format!("Não foi possível abrir: {error}")),
                 }
             }
         });
+        if ui.small_button("Padrões de fábrica").clicked() {
+            self.parameters = Parameters::default();
+            self.status = "Valores originais carregados; calcule para comparar".into();
+            self.error = None;
+        }
         ui.label("Dados do gráfico CSV");
         ui.add(egui::TextEdit::singleline(&mut self.csv_path).desired_width(f32::INFINITY));
         if ui.button("Exportar CSV").clicked() {
@@ -298,22 +681,46 @@ impl EmiApp {
                 }
             }
         }
+        for (label, suffix, temporal) in [
+            ("Exportar H complexa", "transferencia", false),
+            ("Exportar ondas", "ondas", true),
+        ] {
+            if ui.button(label).clicked() {
+                if let Some(simulation) = &self.simulation {
+                    let path = std::path::Path::new(&self.csv_path)
+                        .with_extension(format!("{suffix}.csv"));
+                    let data = if temporal {
+                        engine::export_waveform_csv(simulation)
+                    } else {
+                        Ok(engine::export_transfer_csv(simulation))
+                    };
+                    match data.and_then(|csv| std::fs::write(&path, csv).map_err(|e| e.to_string()))
+                    {
+                        Ok(()) => {
+                            self.status = format!("Exportado: {}", path.display());
+                            self.error = None;
+                        }
+                        Err(error) => {
+                            self.error = Some(format!("Não foi possível exportar: {error}"))
+                        }
+                    }
+                }
+            }
+        }
         ui.add_space(10.0);
         ui.label(
-            RichText::new("Modelo linear · perdas extrapoladas\nSem saturação ou aquecimento")
-                .small()
-                .color(MUTED),
+            RichText::new(
+                "Modelo linear · perdas extrapoladas\nSem H2/H3 geradas, saturação ou aquecimento",
+            )
+            .small()
+            .color(MUTED),
         );
     }
 
     fn diagram(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Circuito original").size(17.0).strong());
-            ui.label(
-                RichText::new("Edite os valores diretamente no esquema")
-                    .small()
-                    .color(MUTED),
-            );
+            ui.label(RichText::new("Circuito original").size(17.0).strong())
+                .on_hover_text("Edite valores; clique no nome para abrir parâmetros.\nCx: classe X2. Cy: classe Y.");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.checkbox(&mut self.show_reference, "Ver esquema final PDF");
             });
@@ -348,11 +755,14 @@ impl EmiApp {
             .show(ui, |ui| {
                 let width = ui.available_width();
                 let scale = (width / 1160.0).min(1.0);
+                let yscale = (ui.ctx().screen_rect().height() * 0.25 / 314.0)
+                    .clamp(0.58, 0.84)
+                    .min(scale);
                 let (rect, _) =
-                    ui.allocate_exact_size(Vec2::new(width, 314.0 * scale), Sense::hover());
+                    ui.allocate_exact_size(Vec2::new(width, 314.0 * yscale), Sense::hover());
                 let painter = ui.painter_at(rect);
                 let at =
-                    |x: f32, y: f32| Pos2::new(rect.left() + x * scale, rect.top() + y * scale);
+                    |x: f32, y: f32| Pos2::new(rect.left() + x * scale, rect.top() + y * yscale);
                 let line = |x1: f32, y1: f32, x2: f32, y2: f32| {
                     painter.line_segment([at(x1, y1), at(x2, y2)], Stroke::new(1.6f32, INK));
                 };
@@ -407,7 +817,14 @@ impl EmiApp {
                     }
                 };
                 text(24.0, 19.0, "REDE", Align2::LEFT_CENTER, 12.0, BLUE);
-                text(1137.0, 19.0, "3 SERVOS", Align2::RIGHT_CENTER, 12.0, BLUE);
+                text(
+                    1137.0,
+                    19.0,
+                    &format!("{} SERVOS", self.parameters.extra.servo_count),
+                    Align2::RIGHT_CENTER,
+                    12.0,
+                    BLUE,
+                );
                 text(
                     580.0,
                     19.0,
@@ -464,6 +881,19 @@ impl EmiApp {
                 text(745.0, 154.0, "PE", Align2::LEFT_CENTER, 10.0, MUTED);
                 cap(730.0, 253.0, 220.0, 284.0);
                 cap(1015.0, 148.0, 76.0, 220.0);
+                if self.parameters.cx3_bypass_nf > 0.0 {
+                    cap(946.0, 148.0, 76.0, 220.0);
+                    dot(946.0, 76.0);
+                    dot(946.0, 220.0);
+                    text(
+                        946.0,
+                        176.0,
+                        &format!("Cb {} nF", compact(self.parameters.cx3_bypass_nf)),
+                        Align2::CENTER_CENTER,
+                        10.0,
+                        BLUE,
+                    );
+                }
                 line(36.0, 284.0, 1126.0, 284.0);
                 dot(730.0, 284.0);
                 pe(400.0, 293.0);
@@ -473,12 +903,24 @@ impl EmiApp {
                 text(
                     880.0,
                     304.0,
-                    "PE direto · todos os símbolos representam a mesma conexão",
+                    &format!(
+                        "PE: {} Ω + jω·{} µH para a referência",
+                        compact(self.parameters.pe_r_ohm),
+                        compact(self.parameters.pe_l_uh)
+                    ),
                     Align2::CENTER_CENTER,
                     10.0,
                     MUTED,
                 );
 
+                text(
+                    400.0,
+                    274.0,
+                    "Σ: fluxos somando · Δ: fluxos opondo",
+                    Align2::CENTER_CENTER,
+                    11.0,
+                    MUTED,
+                );
                 let p = &mut self.parameters;
                 schematic_field(
                     ui,
@@ -583,104 +1025,279 @@ impl EmiApp {
                     0.01,
                 );
             });
-        ui.label(RichText::new("Σ = série somando fluxos; Δ = série opondo. Cx: classe X2. Cy: classe Y. Valores do circuito final preservados.").small().color(MUTED));
     }
 
     fn model_controls(&mut self, ui: &mut egui::Ui) {
+        egui::Frame::NONE
+            .fill(Color32::from_rgb(236, 244, 250))
+            .stroke(Stroke::new(1.0f32, BORDER))
+            .inner_margin(7.0)
+            .show(ui, |ui| {
+                if let Err(e) = self.editor.show(ui, &mut self.parameters) {
+                    self.error = Some(e);
+                }
+            });
+    }
+
+    fn circuit_and_parameters(&mut self, ui: &mut egui::Ui) {
+        let gap = ui.spacing().item_spacing.x;
+        let width = ui.available_width();
+        let parameters_width = (width * 0.31).clamp(310.0, 390.0);
+        let diagram_width = (width - parameters_width - gap).max(1.0);
+        ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(
+                Vec2::new(diagram_width, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    self.diagram(ui);
+                    if let Some(group) = ui
+                        .ctx()
+                        .data_mut(|d| d.remove_temp::<String>(egui::Id::new("component-click")))
+                    {
+                        self.editor.select(&group);
+                    }
+                    self.graph_controls(ui);
+                },
+            );
+            ui.allocate_ui_with_layout(
+                Vec2::new(parameters_width, 230.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| self.model_controls(ui),
+            );
+        });
+    }
+
+    fn graph_controls(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::horizontal()
+            .id_salt("graph-toolbar-scroll")
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Modelo").strong());
-            for (index, label) in [
-                "Impedâncias e fontes",
-                "Perdas e parasitas",
-                "Alimentação e varredura",
-            ]
-            .iter()
-            .enumerate()
+            for (i, color) in [BLUE, ORANGE, GREEN].into_iter().enumerate() {
+                let label = RichText::new(format!("Gráfico {}", i + 1))
+                    .color(color)
+                    .strong();
+                let response = ui.add_enabled(
+                    i <= self.history.graphs.len(),
+                    egui::Button::new(label)
+                        .fill(if i == self.history.selected {
+                            Color32::from_rgb(218, 234, 246)
+                        } else {
+                            Color32::WHITE
+                        })
+                        .stroke(Stroke::new(
+                            1.0f32,
+                            if i == self.history.selected {
+                                color
+                            } else {
+                                BORDER
+                            },
+                        )),
+                );
+                if response.clicked() {
+                    if let Some(snapshot) = self.history.select(i) {
+                        self.parameters = snapshot.record.parameters.clone();
+                        self.calculated = snapshot.record.parameters;
+                        self.simulation = Some(snapshot.simulation);
+                        self.error = None;
+                        self.status = format!(
+                            "Gráfico {} selecionado · {}",
+                            i + 1,
+                            snapshot.record.timestamp
+                        );
+                    } else {
+                        self.history.edit_target = None;
+                        self.calculate();
+                    }
+                }
+                response.context_menu(|ui| {
+                    if ui.button("Novo gráfico").clicked() {
+                        self.history.edit_target = None;
+                        self.calculate();
+                        ui.close_menu();
+                    }
+                });
+                response.on_hover_text(self.history.graphs.get(i).map_or(
+                    "Gerar próximo gráfico com os valores atuais".into(),
+                    |s| {
+                        format!(
+                            "{} · carregar valores para comparar ou editar; botão direito: novo gráfico",
+                            s.record.timestamp
+                        )
+                    },
+                ));
+            }
+            if ui
+                .add(egui::Button::new("Sobrepor").selected(self.history.overlay))
+                .clicked()
             {
-                ui.selectable_value(&mut self.model_tab, index, *label);
+                self.history.overlay = !self.history.overlay;
+            }
+            for (i, label) in ["Atenuação", "Fase H", "Formas de onda"].iter().enumerate() {
+                ui.selectable_value(&mut self.plot_tab, i, *label);
             }
         });
-        egui::Frame::NONE.fill(Color32::from_rgb(236, 244, 250)).stroke(Stroke::new(1.0f32, BORDER)).inner_margin(8.0).show(ui, |ui| {
-            let p = &mut self.parameters;
-            match self.model_tab {
-                0 => {
-                    ui.columns(4, |cols| {
-                        numeric_row(&mut cols[0], "Rede / fase", &mut p.grid_phase_z_ohm, "Ω", 0.01);
-                        numeric_row(&mut cols[0], "Referência", &mut p.grid_z_ref_hz, "Hz", 1.0);
-                        numeric_row(&mut cols[0], "R da fase", &mut p.grid_phase_r_ohm, "Ω", 0.01);
-                        numeric_row(&mut cols[1], "Rede CM total", &mut p.grid_cm_z_ohm, "Ω", 0.01);
-                        numeric_row(&mut cols[1], "R rede CM", &mut p.grid_cm_r_ohm, "Ω", 0.01);
-                        numeric_row(&mut cols[1], "Fonte / fase", &mut p.source_phase_r_ohm, "Ω", 1.0);
-                        numeric_row(&mut cols[2], "Fonte CM total", &mut p.source_cm_r_ohm, "Ω", 10.0);
-                        numeric_row(&mut cols[2], "R do PE", &mut p.pe_r_ohm, "Ω", 0.01);
-                        numeric_row(&mut cols[2], "L do PE", &mut p.pe_l_uh, "µH", 0.01);
-                        numeric_row(&mut cols[3], "Quadrada", &mut p.noise_frequency_hz, "Hz", 100.0);
-                        numeric_row(&mut cols[3], "Atraso A -> B", &mut p.noise_delay_deg, "°", 1.0);
-                        numeric_row(&mut cols[3], "Fase inicial A", &mut p.noise_phase_a_deg, "°", 1.0);
-                    });
-                    let l = ((p.grid_phase_z_ohm.powi(2)-p.grid_phase_r_ohm.powi(2)).max(0.0)).sqrt()/(2.0*PI*p.grid_z_ref_hz);
-                    ui.label(RichText::new(format!("Zfase(f) = R + j·2πfL      L = √(Zref² − R²) / (2πfref) = {:.6} mH/fase      ZDM = 2·Zfase", l*1000.0)).font(FontId::monospace(11.0)).color(BLUE));
-                    ui.label(RichText::new("Rede CM normalizada na mesma frequência. Fonte CM é a porta total. Portadoras livres, sem reinício nos zeros dos 60 Hz.").small().color(MUTED));
-                }
-                1 => {
-                    ui.columns(4, |cols| {
-                        numeric_row(&mut cols[0], "DCR L1 / enrol.", &mut p.l1_dcr_mohm, "mΩ", 0.1);
-                        numeric_row(&mut cols[0], "Q CM de L1", &mut p.l1_q, "", 0.5);
-                        numeric_row(&mut cols[0], "Medição de Q", &mut p.l1_q_hz, "Hz", 10.0);
-                        numeric_row(&mut cols[0], "Cp / enrol.", &mut p.choke_cp_pf, "pF", 1.0);
-                        numeric_row(&mut cols[1], "R AC de L2", &mut p.l2_rs_ohm, "Ω", 0.001);
-                        numeric_row(&mut cols[1], "R AC de L3", &mut p.l3_rs_ohm, "Ω", 0.001);
-                        numeric_row(&mut cols[1], "ESR Cx1", &mut p.cx1_esr_ohm, "Ω", 0.001);
-                        numeric_row(&mut cols[1], "ESL Cx1", &mut p.cx1_esl_nh, "nH", 1.0);
-                        numeric_row(&mut cols[2], "ESR Cx2", &mut p.cx2_esr_ohm, "Ω", 0.001);
-                        numeric_row(&mut cols[2], "ESL Cx2", &mut p.cx2_esl_nh, "nH", 1.0);
-                        numeric_row(&mut cols[2], "ESR Cx3", &mut p.cx3_esr_ohm, "Ω", 0.001);
-                        numeric_row(&mut cols[2], "ESL Cx3", &mut p.cx3_esl_nh, "nH", 1.0);
-                        numeric_row(&mut cols[3], "ESR de cada Cy", &mut p.cy_esr_ohm, "Ω", 0.001);
-                        numeric_row(&mut cols[3], "ESL de cada Cy", &mut p.cy_esl_nh, "nH", 1.0);
-                    });
-                    ui.label(RichText::new("Perdas AC extrapoladas constantes. R AC de L2/L3 não é DCR para calcular aquecimento. Parasitas em zero = aproximação, não medição.").small().color(MUTED));
-                }
-                _ => {
-                    ui.columns(4, |cols| {
-                        numeric_row(&mut cols[0], "Tensão / fase", &mut p.mains_phase_v_rms, "V RMS", 1.0);
-                        numeric_row(&mut cols[0], "Fundamental", &mut p.mains_frequency_hz, "Hz", 1.0);
-                        numeric_row(&mut cols[0], "Atraso das fases", &mut p.mains_phase_deg, "°", 1.0);
-                        numeric_row(&mut cols[1], "Consumo conjunto", &mut p.load_rms_a, "A RMS", 0.1);
-                        numeric_row(&mut cols[1], "Pico", &mut p.load_peak_a, "A", 0.5);
-                        numeric_row(&mut cols[1], "Quadrada ideal", &mut p.noise_peak_v, "V pico", 0.1);
-                        numeric_row(&mut cols[2], "Início da curva", &mut p.sweep_min_hz, "Hz", 100.0);
-                        numeric_row(&mut cols[2], "Fim da curva", &mut p.sweep_max_hz, "Hz", 1000.0);
-                        cols[2].horizontal(|ui| { ui.label("Pontos"); ui.add(egui::DragValue::new(&mut p.sweep_points).range(32..=50000).speed(100)); });
-                        numeric_row(&mut cols[3], "Série até", &mut p.noise_max_hz, "Hz", 1000.0);
-                        cols[3].label(RichText::new(format!("Entre fases: {:.2} V RMS",2.0*p.mains_phase_v_rms*(0.5*p.mains_phase_deg.to_radians()).sin().abs())).small().color(BLUE));
-                    });
-                    ui.label(RichText::new("Fundamental e ruído têm fases independentes. O modelo linear não inclui os retificadores dos servos, saturação ou efeito da corrente.").small().color(MUTED));
-                }
+            });
+    }
+
+    fn wave_controls(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            for (i, label) in ["Fase A", "Fase B", "DM", "CM"].iter().enumerate() {
+                ui.selectable_value(&mut self.wave_mode, i, *label);
+            }
+            ui.separator();
+            for (i, label) in ["Onda", "dx/dt", "d²x/dt²"].iter().enumerate() {
+                ui.selectable_value(&mut self.derivative_order, i, *label);
             }
         });
     }
 
+    fn comparison_plot(&self, ui: &mut egui::Ui) {
+        let snapshots = self
+            .history
+            .graphs
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| self.history.overlay || *i == self.history.selected)
+            .collect::<Vec<_>>();
+        let mut names = Vec::new();
+        let mut data = Vec::new();
+        for (i, g) in snapshots {
+            let color = [BLUE, ORANGE, GREEN][i];
+            if self.plot_tab == 0 {
+                for (dm, visible, label) in
+                    [(true, self.show_dm, "DM"), (false, self.show_cm, "CM")]
+                {
+                    if !visible {
+                        continue;
+                    }
+                    let points = g
+                        .simulation
+                        .points
+                        .iter()
+                        .map(|p| {
+                            [
+                                p.frequency_hz,
+                                match (dm, self.modal_total) {
+                                    (true, true) => p.dm_total_db,
+                                    (false, true) => p.cm_total_db,
+                                    (true, false) => p.dm_db,
+                                    (false, false) => p.cm_db,
+                                },
+                            ]
+                        })
+                        .collect();
+                    names.push(format!("Gráfico {} · {}", i + 1, label));
+                    data.push((color, points));
+                }
+            } else if self.plot_tab == 1 {
+                for (dm, visible, label) in
+                    [(true, self.show_dm, "H DM"), (false, self.show_cm, "H CM")]
+                {
+                    if !visible {
+                        continue;
+                    }
+                    let mut previous = 0.0;
+                    let mut phase = 0.0;
+                    let points = g
+                        .simulation
+                        .points
+                        .iter()
+                        .enumerate()
+                        .map(|(j, p)| {
+                            let a = if dm {
+                                p.transfer.dm_from_dm
+                            } else {
+                                p.transfer.cm_from_cm
+                            }
+                            .arg()
+                            .to_degrees();
+                            if j == 0 {
+                                phase = a;
+                            } else {
+                                phase += (a - previous + 180.0).rem_euclid(360.0) - 180.0;
+                            }
+                            previous = a;
+                            [p.frequency_hz, phase]
+                        })
+                        .collect();
+                    names.push(format!("Gráfico {} · {}", i + 1, label));
+                    data.push((color, points));
+                }
+            } else if let Some(wave) = &g.simulation.waveform {
+                let points = wave
+                    .iter()
+                    .map(|p| {
+                        let v = p.after[self.derivative_order];
+                        let y = match self.wave_mode {
+                            0 => v[0],
+                            1 => v[1],
+                            2 => v[0] - v[1],
+                            _ => (v[0] + v[1]) / 2.0,
+                        };
+                        [p.time_s * 1e6, y]
+                    })
+                    .collect();
+                names.push(format!("Gráfico {} · com filtro", i + 1));
+                data.push((color, points));
+            }
+        }
+        let series = names
+            .iter()
+            .zip(data)
+            .map(|(name, (color, points))| (name.as_str(), color, points))
+            .collect::<Vec<_>>();
+        let (title, x, y) = match self.plot_tab {
+            0 => ("Comparação · atenuação na rede", "Hz", "dB"),
+            1 => ("Comparação · fase de H", "Hz", "graus"),
+            _ => (
+                "Comparação · ruído filtrado na rede",
+                "µs",
+                ["V", "V/s", "V/s²"][self.derivative_order],
+            ),
+        };
+        scientific_plot(
+            ui,
+            (title, self.selected_timestamp()),
+            x,
+            y,
+            &series,
+            self.plot_tab != 2,
+            (self.plot_tab == 0 && !self.automatic_db)
+                .then_some([self.plot_min_db, self.plot_max_db]),
+        );
+        if self.plot_tab == 0 {
+            ui.small("Perda de inserção de tensão em relação à mesma rede sem filtro. Cor identifica o gráfico; DM contínuo, CM tracejado. Harmônicas da excitação aparecem na tabela do gráfico selecionado.");
+        }
+    }
+
     fn plot(&self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Atenuação na rede").size(17.0).strong());
-            ui.label(
-                RichText::new("dB · perda de inserção de tensão · frequência logarítmica")
-                    .small()
-                    .color(MUTED),
-            );
-        });
-        let height =
-            (ui.ctx().screen_rect().bottom() - ui.cursor().top() - 85.0).clamp(230.0, 345.0);
+        let height = (ui.ctx().screen_rect().bottom() - ui.cursor().top() - 85.0).max(155.0);
         let (rect, response) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, Color32::WHITE);
+        let legend = [
+            (self.show_dm, "DM", BLUE),
+            (self.show_cm, "CM", ORANGE),
+            (self.show_harmonics, "Excitação · harmônicas", GREEN),
+        ]
+        .into_iter()
+        .filter(|(visible, _, _)| *visible)
+        .map(|(_, label, color)| (label, color, false))
+        .collect::<Vec<_>>();
         let chart = Rect::from_min_max(
             rect.min + Vec2::new(51.0, 16.0),
             rect.max - Vec2::new(17.0, 37.0),
         );
         let Some(result) = &self.simulation else {
+            plot_header(
+                &painter.with_clip_rect(chart),
+                chart,
+                "Atenuação na rede",
+                self.selected_timestamp(),
+                &legend,
+            );
             painter.text(
                 rect.center(),
                 Align2::CENTER_CENTER,
@@ -701,7 +1318,24 @@ impl EmiApp {
             ymin = 0.0;
             ymax = 0.0;
             for point in &result.points {
-                for (value, visible) in [(point.dm_db, self.show_dm), (point.cm_db, self.show_cm)] {
+                for (value, visible) in [
+                    (
+                        if self.modal_total {
+                            point.dm_total_db
+                        } else {
+                            point.dm_db
+                        },
+                        self.show_dm,
+                    ),
+                    (
+                        if self.modal_total {
+                            point.cm_total_db
+                        } else {
+                            point.cm_db
+                        },
+                        self.show_cm,
+                    ),
+                ] {
                     if visible && value.is_finite() {
                         ymin = ymin.min(value);
                         ymax = ymax.max(value);
@@ -775,7 +1409,7 @@ impl EmiApp {
             painter.text(
                 Pos2::new(chart.left() - 7.0, y),
                 Align2::RIGHT_CENTER,
-                format!("{ytick:.0}"),
+                compact(ytick),
                 FontId::monospace(11.0),
                 MUTED,
             );
@@ -809,7 +1443,12 @@ impl EmiApp {
                     .points
                     .iter()
                     .filter_map(|p| {
-                        let db = if is_dm { p.dm_db } else { p.cm_db };
+                        let db = match (is_dm, self.modal_total) {
+                            (true, true) => p.dm_total_db,
+                            (false, true) => p.cm_total_db,
+                            (true, false) => p.dm_db,
+                            (false, false) => p.cm_db,
+                        };
                         (db.is_finite() && p.frequency_hz > 0.0).then(|| pos(p.frequency_hz, db))
                     })
                     .collect::<Vec<_>>();
@@ -836,28 +1475,6 @@ impl EmiApp {
                 );
             }
         }
-        let mut lx = chart.left() + 8.0;
-        for (visible, color, label) in [
-            (self.show_dm, BLUE, "DM"),
-            (self.show_cm, ORANGE, "CM"),
-            (self.show_harmonics, GREEN, "Quadradas · harmônicas"),
-        ] {
-            if visible {
-                let y = chart.top() + 12.0;
-                painter.line_segment(
-                    [Pos2::new(lx, y), Pos2::new(lx + 16.0, y)],
-                    Stroke::new(2.5f32, color),
-                );
-                painter.text(
-                    Pos2::new(lx + 22.0, y),
-                    Align2::LEFT_CENTER,
-                    label,
-                    FontId::proportional(12.0),
-                    color,
-                );
-                lx += if label.len() > 3 { 190.0 } else { 75.0 };
-            }
-        }
         if let Some(cursor) = response.hover_pos().filter(|p| chart.contains(*p)) {
             let freq =
                 10f64.powf(lo + ((cursor.x - chart.left()) / chart.width()) as f64 * (hi - lo));
@@ -877,8 +1494,28 @@ impl EmiApp {
                             .strong()
                             .monospace(),
                     );
-                    ui.colored_label(BLUE, format!("DM  {:.3} dB", nearest.dm_db));
-                    ui.colored_label(ORANGE, format!("CM  {:.3} dB", nearest.cm_db));
+                    ui.colored_label(
+                        BLUE,
+                        format!(
+                            "DM  {:.3} dB",
+                            if self.modal_total {
+                                nearest.dm_total_db
+                            } else {
+                                nearest.dm_db
+                            }
+                        ),
+                    );
+                    ui.colored_label(
+                        ORANGE,
+                        format!(
+                            "CM  {:.3} dB",
+                            if self.modal_total {
+                                nearest.cm_total_db
+                            } else {
+                                nearest.cm_db
+                            }
+                        ),
+                    );
                     if let Some(h) = result
                         .harmonics
                         .iter()
@@ -897,6 +1534,128 @@ impl EmiApp {
                 });
             }
         }
+        plot_header(
+            &painter.with_clip_rect(chart),
+            chart,
+            "Atenuação na rede",
+            self.selected_timestamp(),
+            &legend,
+        );
+    }
+
+    fn selected_timestamp(&self) -> Option<&str> {
+        self.history
+            .graphs
+            .get(self.history.selected)
+            .map(|snapshot| snapshot.record.timestamp.as_str())
+    }
+
+    fn additional_plot(&mut self, ui: &mut egui::Ui) {
+        if self.plot_tab == 1 {
+            let Some(s) = &self.simulation else {
+                return;
+            };
+            let mut series = Vec::new();
+            for (dm, visible, label, color) in [
+                (true, self.show_dm, "H DM←DM", BLUE),
+                (false, self.show_cm, "H CM←CM", ORANGE),
+            ] {
+                if !visible {
+                    continue;
+                }
+                let mut previous = 0.0;
+                let mut phase = 0.0;
+                let points = s
+                    .points
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        let a = if dm {
+                            p.transfer.dm_from_dm
+                        } else {
+                            p.transfer.cm_from_cm
+                        }
+                        .arg()
+                        .to_degrees();
+                        if i == 0 {
+                            phase = a;
+                        } else {
+                            phase += (a - previous + 180.0).rem_euclid(360.0) - 180.0;
+                        }
+                        previous = a;
+                        [p.frequency_hz, phase]
+                    })
+                    .collect();
+                series.push((label, color, points));
+            }
+            scientific_plot(
+                ui,
+                (
+                    "Fase da transferência · fonte em aberto para a rede",
+                    self.selected_timestamp(),
+                ),
+                "Hz",
+                "graus",
+                &series,
+                true,
+                None,
+            );
+            ui.label(RichText::new("Fase desenrolada para visualização. CSV contém Re/Im e fase principal; termos cruzados DM↔CM também são exportados.").small().color(MUTED));
+        } else {
+            ui.horizontal(|ui| {
+                for (i, label) in ["Fase A", "Fase B", "DM", "CM"].iter().enumerate() {
+                    ui.selectable_value(&mut self.wave_mode, i, *label);
+                }
+                ui.separator();
+                for (i, label) in ["Onda", "dx/dt", "d²x/dt²"].iter().enumerate() {
+                    ui.selectable_value(&mut self.derivative_order, i, *label);
+                }
+            });
+            let Some(s) = &self.simulation else {
+                return;
+            };
+            let Some(wave) = &s.waveform else {
+                ui.colored_label(ORANGE,"Série longa demais para a reconstrução temporal com amostragem adequada. Reduza a razão entre o limite da série e a fundamental.");
+                return;
+            };
+            let mut series = Vec::new();
+            for (filtered, label, color) in
+                [(false, "Sem filtro", ORANGE), (true, "Com filtro", BLUE)]
+            {
+                let points = wave
+                    .iter()
+                    .map(|t| {
+                        let v = if filtered {
+                            t.after[self.derivative_order]
+                        } else {
+                            t.before[self.derivative_order]
+                        };
+                        let y = match self.wave_mode {
+                            0 => v[0],
+                            1 => v[1],
+                            2 => v[0] - v[1],
+                            _ => (v[0] + v[1]) / 2.0,
+                        };
+                        [t.time_s * 1e6, y]
+                    })
+                    .collect();
+                series.push((label, color, points));
+            }
+            let unit = ["V", "V/s", "V/s²"][self.derivative_order];
+            scientific_plot(
+                ui,
+                (
+                    "Ruído na rede · mesma escala antes e depois",
+                    self.selected_timestamp(),
+                ),
+                "µs",
+                unit,
+                &series,
+                false,
+                None,
+            );
+            ui.label(RichText::new(format!("Dois períodos da série até {} Hz, sem os 60 Hz da alimentação. Reconstrução com H complexa; não linearidade e harmônicas novas não incluídas.",compact(self.calculated.noise_max_hz))).small().color(MUTED));
+        }
     }
 
     fn harmonic_table(&self, ui: &mut egui::Ui) {
@@ -910,7 +1669,7 @@ impl EmiApp {
                         ui.monospace(format!("{:.3}",h.phase_a_db));ui.monospace(format!("{:.3}",h.phase_b_db));ui.end_row();
                     }
                 });
-                ui.label(RichText::new("— indica modo ausente na excitação daquela harmônica. Atenuação conjunta = 10 log10(Σ|Vsem|² / Σ|Vcom|²).").small().color(MUTED));
+                ui.label(RichText::new("— indica ausência de referência naquele modo de entrada; ainda pode haver conversão para ele. Veja a matriz H complexa. Atenuação conjunta = 10 log10(Σ|Vsem|² / Σ|Vcom|²).").small().color(MUTED));
             }
         });
     }
@@ -951,9 +1710,12 @@ impl eframe::App for EmiApp {
                     ui.label(&self.status);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
-                            RichText::new("Ctrl+Enter calcula · Rust nativo")
-                                .small()
-                                .color(MUTED),
+                            RichText::new(format!(
+                                "v{} · Ctrl+Enter calcula · Rust nativo",
+                                env!("CARGO_PKG_VERSION")
+                            ))
+                            .small()
+                            .color(MUTED),
                         );
                     });
                 });
@@ -968,12 +1730,13 @@ impl eframe::App for EmiApp {
             });
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::from_rgb(249,251,252)).inner_margin(10.0)).show(ctx,|ui| {
             egui::ScrollArea::vertical().id_salt("main-scroll").auto_shrink([false,false]).show(ui,|ui| {
-                self.diagram(ui);
-                ui.add_space(7.0);
-                self.model_controls(ui);
+                self.circuit_and_parameters(ui);
                 if let Some(error)=&self.error { ui.colored_label(ORANGE,format!("Erro: {error}")); }
-                ui.add_space(8.0);
-                self.plot(ui);
+                ui.add_space(2.0);
+                if self.history.overlay {
+                    if self.plot_tab==2 {self.wave_controls(ui);}
+                    self.comparison_plot(ui);
+                } else if self.plot_tab==0 {self.plot(ui);} else {self.additional_plot(ui);}
                 self.harmonic_table(ui);
                 ui.label(RichText::new(format!("Hipóteses: rede indutiva normalizada a {} Hz; perdas constantes; série truncada. Valores editáveis não são validação elétrica dos componentes.",compact(self.parameters.grid_z_ref_hz))).small().color(MUTED));
             });
@@ -1109,7 +1872,15 @@ fn schematic_field(
             .insert(egui::TextStyle::Button, FontId::monospace(11.0 * scale));
         ui.style_mut().spacing.interact_size.y = 20.0 * scale;
         ui.horizontal(|ui| {
-            ui.label(RichText::new(label).strong().color(BLUE));
+            if ui
+                .link(RichText::new(label).strong().color(BLUE))
+                .on_hover_text("Abrir parâmetros deste componente")
+                .clicked()
+            {
+                let group = label.split_whitespace().next().unwrap_or(label).to_owned();
+                ui.ctx()
+                    .data_mut(|d| d.insert_temp(egui::Id::new("component-click"), group));
+            }
             ui.add(
                 egui::DragValue::new(value)
                     .speed(speed)

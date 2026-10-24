@@ -1,0 +1,8 @@
+EMI Filter v1.3.0 -- Made with Codex
+
+Linux: execute emi-filter-v1.3.0-linux-x86_64 (ou dist/emi-filter-v1.3.0-linux-x86_64 na entrega).
+Windows 10/11 x86_64: abra emi-filter-v1.3.0-windows-x86_64.exe.
+
+Painel de parâmetros à direita do esquema; gráfico ampliado até 1 MHz.
+Série harmônica limitada a 300 kHz.
+Consulte README.md e docs/MANUAL.md.

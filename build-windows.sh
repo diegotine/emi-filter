@@ -42,7 +42,8 @@ export CARGO_ENCODED_RUSTFLAGS="-Clink-self-contained=no"$'\x1f'"-Ctarget-featur
 
 "$cargo_bin" build --manifest-path "$app_dir/Cargo.toml" --locked \
     --release --target x86_64-pc-windows-gnu
+app_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$app_dir/Cargo.toml" | head -n 1)"
 mkdir -p "$app_dir/dist"
 cp "$build_dir/x86_64-pc-windows-gnu/release/emi-filter.exe" \
-    "$app_dir/dist/emi-filter-windows-x86_64.exe"
-printf 'Executável: %s\n' "$app_dir/dist/emi-filter-windows-x86_64.exe"
+    "$app_dir/dist/emi-filter-v${app_version}-windows-x86_64.exe"
+printf 'Executável: %s\n' "$app_dir/dist/emi-filter-v${app_version}-windows-x86_64.exe"

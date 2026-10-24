@@ -1,6 +1,6 @@
 # Compilação Windows
 
-O arquivo `dist/emi-filter-windows-x86_64.exe` é um executável PE32+ de
+O arquivo `dist/emi-filter-v1.3.0-windows-x86_64.exe` é um executável PE32+ de
 interface gráfica, para Windows 10/11 de 64 bits. O executável contém o
 programa, o cálculo e os recursos usados pela interface. Não usa Python.
 
@@ -44,12 +44,12 @@ teste de execução em uma máquina Windows. Nesta entrega, o executável
 Windows foi compilado e inspecionado a partir do Linux; sua execução no
 Windows não foi verificada.
 
-## Artefato final verificado
+## Artefato anterior 1.0.0 (histórico)
 
 Compilação de publicação da versão 1.0.0 em 20/10/2026, com as fontes
 finais da interface e do modelo:
 
-- Arquivo: `dist/emi-filter-windows-x86_64.exe`.
+- Arquivo: `dist/emi-filter-v1.3.0-windows-x86_64.exe`.
 - Tamanho: 4.924.416 bytes.
 - Formato: PE32+ x86-64, subsistema Windows GUI.
 - SHA-256: `3f4b518588db97581b9bfe3c80e63aff7b200834258850ab7180a6182affea45`.
@@ -81,7 +81,17 @@ hash, mesmo quando os cálculos preservam os mesmos resultados.
 Para inspecionar o resultado sem executar:
 
 ```sh
-file dist/emi-filter-windows-x86_64.exe
-llvm-objdump -p dist/emi-filter-windows-x86_64.exe
-sha256sum dist/emi-filter-windows-x86_64.exe
+file dist/emi-filter-v1.3.0-windows-x86_64.exe
+llvm-objdump -p dist/emi-filter-v1.3.0-windows-x86_64.exe
+sha256sum dist/emi-filter-v1.3.0-windows-x86_64.exe
 ```
+
+## Artefato 1.2.0 — 20/10/2026
+
+- Executável: `dist/emi-filter-v1.3.0-windows-x86_64.exe`.
+- Tamanho: 5,310,464 bytes.
+- SHA-256: `4e3937f9e6bae3d0c91b556eb6b426ab5915d367979b6575ae99cf5132cf4918`.
+- Compilação cruzada concluída sem avisos; imports PE inspecionados com
+  `llvm-readobj --coff-imports`: apenas Windows/UCRT, incluindo OpenGL32.
+- Execução em Windows ainda não verificada. Os números de tamanho e hash
+  da seção anterior identificam apenas a versão histórica 1.0.0.

@@ -1,0 +1,373 @@
+{
+  "cx1_uf": {
+    "group": "Cx1",
+    "label": "Cx1",
+    "unit": "µF",
+    "note": "Entre fases, lado da rede.",
+    "kind": "Informado"
+  },
+  "cx2_uf": {
+    "group": "Cx2",
+    "label": "Cx2",
+    "unit": "µF",
+    "note": "Ramo em série com Rd.",
+    "kind": "Informado"
+  },
+  "cx3_uf": {
+    "group": "Cx3",
+    "label": "Cx3",
+    "unit": "µF",
+    "note": "Entre fases, lado dos servos.",
+    "kind": "Informado"
+  },
+  "cy1_nf": {
+    "group": "Cy1",
+    "label": "Cy da fase A",
+    "unit": "nF",
+    "note": "Fase A ao nó PE.",
+    "kind": "Informado"
+  },
+  "cy2_nf": {
+    "group": "Cy2",
+    "label": "Cy da fase B",
+    "unit": "nF",
+    "note": "Fase B ao nó PE.",
+    "kind": "Informado"
+  },
+  "rd_ohm": {
+    "group": "Rd",
+    "label": "Rd",
+    "unit": "Ω",
+    "note": "Amortecimento em série com Cx2.",
+    "kind": "Informado"
+  },
+  "r1_kohm": {
+    "group": "R1",
+    "label": "R1 de descarga",
+    "unit": "kΩ",
+    "note": "R1 e R2 em série, total de 300 kΩ.",
+    "kind": "Informado"
+  },
+  "r2_kohm": {
+    "group": "R2",
+    "label": "R2 de descarga",
+    "unit": "kΩ",
+    "note": "Segundo resistor do ramo de descarga.",
+    "kind": "Informado"
+  },
+  "l1_sum_mh": {
+    "group": "L1",
+    "label": "L1 série aditiva",
+    "unit": "mH",
+    "note": "Medição com fluxos somando. Não é L por bobina.",
+    "kind": "Medido"
+  },
+  "l1_opp_uh": {
+    "group": "L1",
+    "label": "L1 série oposta",
+    "unit": "µH",
+    "note": "Medição diferencial com fluxos opondo.",
+    "kind": "Medido"
+  },
+  "l1_dcr_mohm": {
+    "group": "L1",
+    "label": "DCR por enrolamento",
+    "unit": "mΩ",
+    "note": "Valor usado no modelo salvo; confirme o tipo de leitura.",
+    "kind": "Informado"
+  },
+  "l1_q": {
+    "group": "L1",
+    "label": "Q de L1 em CM",
+    "unit": "1",
+    "note": "Q atual. Q=60 a 10 kHz é histórico de outro enrolamento.",
+    "kind": "Medido"
+  },
+  "l1_q_hz": {
+    "group": "L1",
+    "label": "Frequência da medição de Q",
+    "unit": "Hz",
+    "note": "Frequência do Q atual.",
+    "kind": "Medido"
+  },
+  "l2_uh": {
+    "group": "L2",
+    "label": "L2 da fase A",
+    "unit": "µH",
+    "note": "Padrão atual preservado; bobinas do amplificador são alternativas.",
+    "kind": "Medido"
+  },
+  "l3_uh": {
+    "group": "L3",
+    "label": "L3 da fase B",
+    "unit": "µH",
+    "note": "Padrão atual preservado.",
+    "kind": "Medido"
+  },
+  "l2_rs_ohm": {
+    "group": "L2",
+    "label": "Rs AC de L2",
+    "unit": "Ω",
+    "note": "|Z|/sqrt(1+Q²), medidos a 100 kHz; não é DCR.",
+    "kind": "Calculado"
+  },
+  "l3_rs_ohm": {
+    "group": "L3",
+    "label": "Rs AC de L3",
+    "unit": "Ω",
+    "note": "Perda AC constante por hipótese na varredura.",
+    "kind": "Calculado"
+  },
+  "grid_phase_z_ohm": {
+    "group": "Rede",
+    "label": "|Z| de cada fase na referência",
+    "unit": "Ω",
+    "note": "0,5 Ω POR FASE; porta DM total de 1 Ω a 60 Hz.",
+    "kind": "Hipótese"
+  },
+  "grid_z_ref_hz": {
+    "group": "Rede",
+    "label": "Frequência de referência da rede",
+    "unit": "Hz",
+    "note": "L=sqrt(|Zref|²−R²)/(2πfref).",
+    "kind": "Hipótese"
+  },
+  "grid_phase_r_ohm": {
+    "group": "Rede",
+    "label": "R de cada fase",
+    "unit": "Ω",
+    "note": "R=0 adota rede puramente indutiva.",
+    "kind": "Hipótese"
+  },
+  "grid_cm_z_ohm": {
+    "group": "Rede",
+    "label": "|Z| da porta CM completa",
+    "unit": "Ω",
+    "note": "Porta independente, 0,5 Ω a 60 Hz.",
+    "kind": "Hipótese"
+  },
+  "grid_cm_r_ohm": {
+    "group": "Rede",
+    "label": "R da porta CM completa",
+    "unit": "Ω",
+    "note": "Não somar novamente aos ramos de fase.",
+    "kind": "Hipótese"
+  },
+  "source_phase_r_ohm": {
+    "group": "Fonte de ruído",
+    "label": "R da fonte por fase",
+    "unit": "Ω",
+    "note": "50 Ω por fase resulta em porta DM de 100 Ω.",
+    "kind": "Hipótese"
+  },
+  "source_cm_r_ohm": {
+    "group": "Fonte de ruído",
+    "label": "R da fonte CM completa",
+    "unit": "Ω",
+    "note": "Porta modal completa de 1 kΩ.",
+    "kind": "Hipótese"
+  },
+  "pe_r_ohm": {
+    "group": "PE",
+    "label": "Resistência do PE",
+    "unit": "Ω",
+    "note": "Padrão ideal explicitamente definido: zero.",
+    "kind": "Hipótese"
+  },
+  "pe_l_uh": {
+    "group": "PE",
+    "label": "Indutância do PE",
+    "unit": "µH",
+    "note": "Padrão ideal zero; preencher se medida.",
+    "kind": "Hipótese"
+  },
+  "noise_frequency_hz": {
+    "group": "Ruído",
+    "label": "Frequência das quadradas",
+    "unit": "Hz",
+    "note": "Padrão validado 20 kHz; observação do inversor indica 10 kHz.",
+    "kind": "Hipótese"
+  },
+  "noise_delay_deg": {
+    "group": "Ruído",
+    "label": "Atraso da fase B em relação à A",
+    "unit": "graus",
+    "note": "Atraso temporal: harmônica n recebe n vezes o ângulo.",
+    "kind": "Hipótese"
+  },
+  "noise_phase_a_deg": {
+    "group": "Ruído",
+    "label": "Fase inicial da quadrada A",
+    "unit": "graus",
+    "note": "Livre em relação aos zeros dos 60 Hz.",
+    "kind": "Hipótese"
+  },
+  "noise_peak_v": {
+    "group": "Ruído",
+    "label": "Amplitude ideal de cada quadrada",
+    "unit": "V pico",
+    "note": "Normalização da fonte, não amplitude conduzida medida.",
+    "kind": "Hipótese"
+  },
+  "noise_max_hz": {
+    "group": "Ruído",
+    "label": "Limite da série de Fourier",
+    "unit": "Hz",
+    "note": "Série ímpar truncada; não é banda medida do componente.",
+    "kind": "Hipótese"
+  },
+  "sweep_min_hz": {
+    "group": "Varredura",
+    "label": "Frequência inicial",
+    "unit": "Hz",
+    "note": "Curvas de transferência contínuas.",
+    "kind": "Hipótese"
+  },
+  "sweep_max_hz": {
+    "group": "Varredura",
+    "label": "Frequência final",
+    "unit": "Hz",
+    "note": "Previsão depende da validade dos modelos nessa faixa.",
+    "kind": "Hipótese"
+  },
+  "mains_phase_v_rms": {
+    "group": "Alimentação",
+    "label": "Tensão de cada fase",
+    "unit": "V RMS",
+    "note": "Duas fases de 127 V.",
+    "kind": "Informado"
+  },
+  "mains_frequency_hz": {
+    "group": "Alimentação",
+    "label": "Frequência da alimentação",
+    "unit": "Hz",
+    "note": "Separada da portadora do ruído.",
+    "kind": "Informado"
+  },
+  "mains_phase_deg": {
+    "group": "Alimentação",
+    "label": "Atraso entre fases da alimentação",
+    "unit": "graus",
+    "note": "120°, aproximadamente 220 V entre fases.",
+    "kind": "Informado"
+  },
+  "load_rms_a": {
+    "group": "Alimentação",
+    "label": "Corrente de operação",
+    "unit": "A RMS",
+    "note": "5 A; não determina a impedância da fonte de ruído.",
+    "kind": "Informado"
+  },
+  "load_peak_a": {
+    "group": "Alimentação",
+    "label": "Corrente de pico",
+    "unit": "A",
+    "note": "20 A de pico; saturação ainda não identificada.",
+    "kind": "Informado"
+  },
+  "cx1_esr_ohm": {
+    "group": "Cx1",
+    "label": "ESR de Cx1",
+    "unit": "Ω",
+    "note": "Zero ideal, não medido.",
+    "kind": "Hipótese"
+  },
+  "cx2_esr_ohm": {
+    "group": "Cx2",
+    "label": "ESR de Cx2",
+    "unit": "Ω",
+    "note": "Não inclui Rd. Zero ideal, não medido.",
+    "kind": "Hipótese"
+  },
+  "cx3_esr_ohm": {
+    "group": "Cx3",
+    "label": "ESR de Cx3",
+    "unit": "Ω",
+    "note": "Zero ideal, não medido.",
+    "kind": "Hipótese"
+  },
+  "cy_esr_ohm": {
+    "group": "Cy1 / Cy2",
+    "label": "ESR de cada Cy",
+    "unit": "Ω",
+    "note": "Mesmo valor para os dois Cy no app atual.",
+    "kind": "Hipótese"
+  },
+  "cx1_esl_nh": {
+    "group": "Cx1",
+    "label": "ESL de Cx1",
+    "unit": "nH",
+    "note": "Zero ideal, não medido.",
+    "kind": "Hipótese"
+  },
+  "cx2_esl_nh": {
+    "group": "Cx2",
+    "label": "ESL de Cx2",
+    "unit": "nH",
+    "note": "Zero ideal, não medido.",
+    "kind": "Hipótese"
+  },
+  "cx3_esl_nh": {
+    "group": "Cx3",
+    "label": "ESL de Cx3",
+    "unit": "nH",
+    "note": "Zero ideal, não medido.",
+    "kind": "Hipótese"
+  },
+  "cy_esl_nh": {
+    "group": "Cy1 / Cy2",
+    "label": "ESL de cada Cy",
+    "unit": "nH",
+    "note": "Mesmo valor para os dois Cy no app atual.",
+    "kind": "Hipótese"
+  },
+  "cx3_bypass_nf": {
+    "group": "Bypass",
+    "label": "Capacitor paralelo a Cx3",
+    "unit": "nF",
+    "note": "Zero desativa este ramo.",
+    "kind": "Hipótese"
+  },
+  "cx3_bypass_esr_ohm": {
+    "group": "Bypass",
+    "label": "ESR do bypass",
+    "unit": "Ω",
+    "note": "Perda própria do capacitor adicional.",
+    "kind": "Hipótese"
+  },
+  "cx3_bypass_esl_nh": {
+    "group": "Bypass",
+    "label": "ESL do bypass",
+    "unit": "nH",
+    "note": "Indutância própria do capacitor adicional.",
+    "kind": "Hipótese"
+  },
+  "choke_cp_pf": {
+    "group": "L1",
+    "label": "Cp por enrolamento de L1",
+    "unit": "pF",
+    "note": "Zero ideal. Não é capacitância entre enrolamentos.",
+    "kind": "Hipótese"
+  },
+  "l2_cp_pf": {
+    "group": "L2",
+    "label": "Cp em paralelo com L2",
+    "unit": "pF",
+    "note": "Não usar C equivalente exibido pelo LCR como Cp sem identificar.",
+    "kind": "Hipótese"
+  },
+  "l3_cp_pf": {
+    "group": "L3",
+    "label": "Cp em paralelo com L3",
+    "unit": "pF",
+    "note": "Zero ideal, não medido.",
+    "kind": "Hipótese"
+  },
+  "sweep_points": {
+    "group": "Varredura",
+    "label": "Quantidade de pontos",
+    "unit": "pontos",
+    "note": "2 a 50000 no motor atual.",
+    "kind": "Hipótese"
+  }
+}
